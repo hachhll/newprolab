@@ -44,19 +44,24 @@ def setMemFile(hdfs_client, file_name):
 def uploadFileIntoClickHouse():
 
     clickhouse_client = Client(host='localhost')
-    clickhouse_client.execute('create table if not exists gevorg_hachaturyan (timestamp Float64 , referer String, location String, remoteHost String, partyId String, sessionId String, pageViewId String,eventType String, item_id String, item_price UInt32, item_url  String, basket_price String, detectedDuplicate UInt8, detectedCorruption UInt8, firstInSession UInt8, userAgentName String) ENGINE = MergeTree PARTITION BY remoteHost ORDER BY timestamp')
+    clickhouse_client.execute('create table if not exists gevorg_hachaturyan (timestamp Float64 , referer String, location String, remoteHost String, partyId String, sessionId String, pageViewId String,eventType String, item_id String, item_price UInt32, item_url  String, basket_price String, detectedDuplicate UInt8, detectedCorruption UInt8, firstInSession UInt8, userAgentName String) ENGINE = MergeTree PARTITION BY referer ORDER BY timestamp')
 
     hdfs_client = InsecureClient('http://npl-namenode.europe-west1-b.c.npl-lab-project.internal:50070', user='gevorg')
     mem_val = getMemFile(hdfs_client)
 
     list_of_files = hdfs_client.list(hdfs_path, status=False)
+    final_list = []
+    
     for file_name in list_of_files:
         if mem_val and file_name <= mem_val:
             continue
         with hdfs_client.read(hdfs_path + '/' + file_name) as reader:
             for one_json_object in decode_stacked(reader.read().decode("utf-8")):
-                clickhouse_client.execute('INSERT INTO gevorg_hachaturyan  VALUES ', [one_json_object])
+                final_list.append(one_json_object)
             setMemFile(hdfs_client, file_name)
+
+    clickhouse_client.execute('INSERT INTO gevorg_hachaturyan  VALUES ', final_list)
+            
 
 default_args = {
     'owner': 'gevorg',
