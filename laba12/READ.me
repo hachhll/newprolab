@@ -1,0 +1,178 @@
+namenode-instance	europe-west1-b	34.76.188.13 
+snamenode-instance	europe-west1-c	34.76.122.253 
+datanode-instance	europe-west2-b	35.197.221.162
+
+1. Prepare Kafka brocker
+	1.1 Custom kafka-broker:	
+		listeners = PLAINTEXT://0.0.0.0:6667
+		advertised.listeners = PLAINTEXT://34.76.188.13:6667  PLAINTEXT://$(MY_POD_IP):$(KAFKA_PORT_NUMBER)
+		 -------- {{ if hostname=='namenode-instance.europe-west1-b.c.root-matrix-234214.internal' then '34.76.188.13:6667' else '34.76.188.13:6667'}}
+	1.2 Restart Kafka
+
+2. Create Kafka topic
+	2.1 Create topic gevorg.hachaturyan
+		/usr/hdp/3.1.0.0-78/kafka/bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 --partitions 3 --topic gevorg.hachaturyan
+		count of partitions = count of consumers
+		replication-factor = count of brockers -1
+	2.2 Check topics
+		/usr/hdp/3.1.0.0-78/kafka/bin/kafka-topics.sh --zookeeper localhost:2181 --list
+	2.3 delete kafka-topic
+		kafka-topics.sh --zookeeper datanode-instance.europe-west2-b.c.root-matrix-234214.internal:2181,snamenode-instance.europe-west1-c.c.root-matrix-234214.internal:2181,namenode-instance.europe-west1-b.c.root-matrix-234214.internal:2181 --delete --topic gevorg.hachaturyan
+		sudo /usr/hdp/3.1.0.0-78/zookeeper/bin/zkCli.sh
+		get /brokers/topics/gevorg.hachaturyan
+		rmr /brokers/topics/gevorg.hachaturyan
+		rmr /admin/delete_topics/gevorg.hachaturyan
+
+3. Install java jdk
+	3.1 Install process
+		sudo apt-get install python-software-properties
+		sudo add-apt-repository ppa:webupd8team/java
+		sudo apt-get update
+		sudo apt-get install oracle-java8-installer
+	3.2 Check Java version JDK
+		java -varsion 
+
+4. Install ELK
+
+	4.x Start Elasticsearch
+		sudo -i service elasticsearch start
+		curl -XGET 'localhost:9200/_cluster/health?pretty'
+	4.x Start kibana
+		sudo -i service kibana start
+		curl -XGET 'localhost:5601'
+		http://34.76.188.13:5601/app/kibana
+	4.x start logstash
+		sudo -i service logstash start
+
+5. AirFlow
+	5.1 install virtualenv
+		sudo apt-get update
+		sudo pip3 install virtualenv
+		virtualenv --version
+	5.2 install airflow
+		sudo mkdir -p /opt/airflow/workspace
+		sudo chown ubuntu -R /opt/airflow
+		cd /opt/airflow/workspace
+		virtualenv -p /usr/bin/python3 venv		
+		export AIRFLOW_HOME=/opt/airflow/workspace/airflow_home
+		export AIRFLOW_GPL_UNIDECODE=yes
+		source venv/bin/activate
+		pip install apache-airflow
+		sudo -u postgres createuser --interactive
+			Enter name of role to add: airflow
+			Shall the new role be a superuser? (y/n) n
+			Shall the new role be allowed to create databases? (y/n) n
+			Shall the new role be allowed to create more new roles? (y/n) n
+		sudo -u postgres psql
+		ALTER USER airflow WITH PASSWORD 'airflow_password';
+		CREATE DATABASE airflow;
+		sudo service postgresql restart
+		airflow initdb
+		airflow version
+		vim ./airflow_home/airflow.cfg
+		sql_alchemy_conn = postgresql://airflow:airflow_password@localhost/airflow
+	5.3 Start Airflow
+		cd /opt/airflow/workspace
+		export AIRFLOW_HOME=/opt/airflow/workspace/airflow_home
+		export AIRFLOW_GPL_UNIDECODE=yes
+		source venv/bin/activate
+		airflow webserver --port 8081 &
+		airflow scheduler &
+		http://34.76.188.13:8081/admin/
+6. Click House
+	6.1 Install
+		sudo vim /etc/apt/sources.list
+			deb http://repo.yandex.ru/clickhouse/deb/stable/ main/
+		sudo apt-get install dirmngr 
+		sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv E0C56BD4
+		sudo apt-get update
+		sudo apt-get install clickhouse-client clickhouse-server
+		sudo service clickhouse-server start
+		sudo vim /etc/clickhouse-server/config.xml
+			<listen_host>::</listen_host>
+		sudo /etc/init.d/clickhouse-server restart
+			OR
+		server restart
+
+
+
+
+++++++++++++++++++++++++++++++++++++++++++++
+
+Change Kafka replication fator:
+
+1. Create json file increase-replication-factor.json :
+
+{"version":1,
+  "partitions":[
+     {"topic":"gevorg.hachaturyan","partition":0,"replicas":[0,1,2]},
+     {"topic":"gevorg.hachaturyan","partition":1,"replicas":[0,1,2]},
+     {"topic":"gevorg.hachaturyan","partition":2,"replicas":[0,1,2]}
+]}
+
+2. Run
+/usr/hdp/3.1.0.0-78/kafka/bin/kafka-reassign-partitions.sh --zookeeper localhost:2181 --reassignment-json-file increase-replication-factor.json --execute
+
+/usr/hdp/3.1.0.0-78/kafka/bin/kafka-topics.sh --zookeeper localhost:2181 --alter --topic gevorg.hachaturyan --replication-factor 3
+/usr/hdp/3.1.0.0-78/kafka/bin/kafka-topics.sh --zookeeper localhost:2181 --alter --topic gevorg.hachaturyan --partitions 3
+
+num.replica.fetchers=3
+replica.fetch.max.bytes=1048576
+replica.socket.receive.buffer.bytes=65536
+num.partitions=3
+num.io.threads=6
+
+
+PLAINTEXT://snamenode-instance.europe-west1-c.c.root-matrix-234214.internal:6667, PLAINTEXT://namenode-instance.europe-west1-b.c.root-matrix-234214.internal:6667, PLAINTEXT://datanode-instance.europe-west2-b.c.root-matrix-234214.internal:6667
+
++++++++++++++++  Kafka produce/consume ++++++++++++++++++++++++++++++++++++++
+
+/usr/hdp/3.1.0.0-78/kafka/bin/kafka-console-producer.sh --broker-list 34.76.188.13:6667 --topic gevorg.hachaturyan < ~/kafka-produser-test.json
+
+/usr/hdp/3.1.0.0-78/kafka/bin/kafka-console-consumer.sh --bootstrap-server 34.76.188.13:6667 --topic gevorg.hachaturyan --from-beginning
+
+++++++++++++++++++  Kafka config change (retention) ++++++++++++++++++++++++++++++++++++++
+
+
+/usr/hdp/3.1.0.0-78/kafka/bin/kafka-configs.sh --zookeeper datanode-instance.europe-west2-b.c.root-matrix-234214.internal:2181,snamenode-instance.europe-west1-c.c.root-matrix-234214.internal:2181,namenode-instance.europe-west1-b.c.root-matrix-234214.internal:2181 --alter --entity-type topics --entity-name gevorg.hachaturyan --add-config retention.ms=600
+
+/usr/hdp/3.1.0.0-78/kafka/bin/kafka-configs.sh --zookeeper datanode-instance.europe-west2-b.c.root-matrix-234214.internal:2181,snamenode-instance.europe-west1-c.c.root-matrix-234214.internal:2181,namenode-instance.europe-west1-b.c.root-matrix-234214.internal:2181 --alter --entity-type topics --entity-name gevorg.hachaturyan --add-config max.message.bytes=5242880
+
+/usr/hdp/3.1.0.0-78/kafka/bin/kafka-configs.sh --zookeeper datanode-instance.europe-west2-b.c.root-matrix-234214.internal:2181,snamenode-instance.europe-west1-c.c.root-matrix-234214.internal:2181,namenode-instance.europe-west1-b.c.root-matrix-234214.internal:2181 --alter --entity-type topics --entity-name gevorg.hachaturyan --add-config max.request.size=5242880
+
+/usr/hdp/3.1.0.0-78/kafka/bin/kafka-topics.sh --zookeeper datanode-instance.europe-west2-b.c.root-matrix-234214.internal:2181,snamenode-instance.europe-west1-c.c.root-matrix-234214.internal:2181,namenode-instance.europe-west1-b.c.root-matrix-234214.internal:2181 --alter --topic gevorg.hachaturyan --max.request.size 5242880
+
+++++++++++++++++++  Elasticsearch DELETE All for index ++++++++++++++++++++++++++++++++
+
+curl -XDELETE 'http://localhost:9200/gevorg.hachaturyan'
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
++=====================================================================================+
+Step by step start claster
+
+1. Run it on google cloud
+	- Start datanode
+	- sudo ambari-agent status
+	- Start Sec Name node
+	- sudo ambari-agent status
+	- Start Name node 
+	- sudo ambari-agent status
+	- sudo ambari-server status
+2. Run AirFlow
+	- open another terminal
+	- copypast from p 5.3
+3. Run Elsaticsearch
+	- run it on all nodes:
+		sudo -i service elasticsearch start
+4. Run Kibana
+	- run it on namenode
+		sudo -i service kibana start
+5. Check connection to ClickHouse
+	- On Intellij
+	- curl 'http://35.197.221.162:8123/'
+	- curl 'http://34.76.188.13:8123/'
+	- sudo lsof -i :8123
+
+	- curl 'http://35.197.221.162:8123/'
